@@ -1,12 +1,13 @@
 using UnityEngine;
+using System.Collections;
 
 public class BoatController : MonoBehaviour
 {
     [Header("Rowing Settings")]
-    public float rowForce = 5f;          // target added speed per stroke
-    public float maxSpeed = 5f;          // max forward speed
-    public float drag = 1f;              // slowdown rate
-    public float strokeDuration = 0.3f;  // how long it takes to "dig in" (in seconds)
+    public float rowForce = 5f;
+    public float maxSpeed = 5f;
+    public float drag = 1f;
+    public float strokeDuration = 0.3f;
 
     private float currentSpeed = 0f;
     private bool expectingLeft = true;
@@ -15,16 +16,29 @@ public class BoatController : MonoBehaviour
     private float strokeTimer = 0f;
     private float strokeTarget = 0f;
 
+    private bool externallyPaused = false;
+    private bool isSlowingToStop = false;
+
+    [Header("Slow/Stop Settings")]
+    public float slowStopDragMultiplier = 4f;
+    public float slowStopMinSpeed = 0.02f;
+
+    public float CurrentSpeed => currentSpeed;
+
     void Update()
     {
-        HandleInput();
-        UpdateStroke();
+        if (!externallyPaused)
+        {
+            HandleInput();
+            UpdateStroke();
+        }
+
         ApplyMovement();
     }
 
     void HandleInput()
     {
-        if (isStroking) return; // can’t start a new stroke mid-stroke
+        if (isStroking) return;
 
         if (expectingLeft && Input.GetKeyDown(KeyCode.A))
         {
@@ -40,7 +54,6 @@ public class BoatController : MonoBehaviour
 
     void BeginStroke()
     {
-        // Start a new rowing stroke
         isStroking = true;
         strokeTimer = 0f;
         strokeTarget = Mathf.Clamp(currentSpeed + rowForce, 0f, maxSpeed);
@@ -52,25 +65,59 @@ public class BoatController : MonoBehaviour
 
         strokeTimer += Time.deltaTime;
         float t = strokeTimer / strokeDuration;
-
-        // Smooth ease-in curve (starts slow, builds power)
         float curve = Mathf.SmoothStep(0f, 1f, t);
 
-        // Interpolate current speed toward the stroke target
         currentSpeed = Mathf.Lerp(currentSpeed, strokeTarget, curve * Time.deltaTime * 5f);
 
         if (strokeTimer >= strokeDuration)
-        {
             isStroking = false;
-        }
     }
 
     void ApplyMovement()
     {
-        // Move the boat to the right
         transform.position += Vector3.right * currentSpeed * Time.deltaTime;
 
-        // Apply drag (momentum loss)
         currentSpeed = Mathf.MoveTowards(currentSpeed, 0f, drag * Time.deltaTime);
+    }
+
+    public void PauseControl()
+    {
+        externallyPaused = true;
+    }
+
+    public void ResumeControl()
+    {
+        externallyPaused = false;
+        isStroking = false;
+    }
+
+    public void RequestSlowStop(System.Action onStopped)
+    {
+        if (!isSlowingToStop)
+            StartCoroutine(SlowStopRoutine(onStopped, slowStopDragMultiplier, slowStopMinSpeed));
+    }
+
+    IEnumerator SlowStopRoutine(System.Action onStopped, float stopDragMultiplier, float minSpeed)
+    {
+        isSlowingToStop = true;
+        externallyPaused = true;
+        isStroking = false;
+
+        while (currentSpeed > minSpeed)
+        {
+            currentSpeed = Mathf.MoveTowards(
+                currentSpeed,
+                0f,
+                drag * stopDragMultiplier * Time.deltaTime
+            );
+
+            transform.position += Vector3.right * currentSpeed * Time.deltaTime;
+
+            yield return null;
+        }
+
+        currentSpeed = 0f;
+        isSlowingToStop = false;
+        onStopped?.Invoke();
     }
 }
